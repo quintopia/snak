@@ -1,8 +1,9 @@
 import sys
-from collections import deque,Counter
+from collections import deque
 import copy
 import bisect
 from collections import defaultdict
+from itertools import combinations
 
 #define directions as tuples
 NORTH=(0,-1)
@@ -44,37 +45,47 @@ class Snak:
             self.dir=dir
             self.length=length
             self.pts=deque([(x,y)])
+            self.ptset={(x,y)}
             
         def changeLength(self,inc):
             self.length+=inc
             while len(self.pts)>self.length:
-                self.pts.pop()
+                pt = self.pts.pop()
+                self.ptset.remove(pt)
             if not self.length:
                 raise IndexError("snake starved")
             
-        #can snake see the target point? (is its head in the same row/column and is its own body nor any other snake bodies not in the way?)
+        #can snake see the target point? (is its head in the same row/column with no snake bodies in the way?)
         def canSee(self,target,snakes):
-            occluders = [pt for snake in snakes for pt in snake.pts]
-            if target[0]==self.pos[0]:
-                return all(map(lambda pt:pt[0]!=target[0] or pt==self.pos or sorted([target,self.pos,pt])[1]!=pt,occluders))
-            elif target[1]==self.pos[1]:
-                return all(map(lambda pt:pt[1]!=target[1] or pt==self.pos or sorted([target,self.pos,pt])[1]!=pt,occluders))
+            #this is the major bottleneck for speed but i have no idea how to speed it up.
+            #(checking every point in every snake to see whether it lies between the two is slower than this for long snakes)
+            if target[0]!=self.pos[0]:
+                for x in range(min(target[0],self.pos[0])+1,max(target[0],self.pos[0])):
+                    for snake in snakes:
+                        if (x,self.pos[1]) in snake.ptset:
+                            return False
             else:
-                return False
+                for y in range(min(target[1],self.pos[1])+1,max(target[1],self.pos[1])):
+                    for snake in snakes:
+                        if (self.pos[0],y) in snake.ptset:
+                            return False
+            return True
         
         #take a step in the current direction and return whether it succeeded
         def step(self):
             self.pos=add(self.pos,self.dir)
             if len(self.pts) >= self.length:
-                self.pts.pop()
-            retval = self.pos not in self.pts
+                pt = self.pts.pop()
+                self.ptset.remove(pt)
+            if self.pos in self.ptset:
+                raise Collision(self.pos)
             self.pts.appendleft(self.pos)
-            return retval
+            self.ptset.add(self.pos)
             
         def reprAt(self,pos):
             if self.pos==pos:
                 return '@'
-            if pos in self.pts:
+            if pos in self.ptset:
                 return '#'
             return ''
             
@@ -162,7 +173,7 @@ class Snak:
         basefruit = self.getFruit(snake.pos)
         if basefruit is None:
             return
-        fruit = copy.deepcopy(basefruit)
+        fruit = copy.copy(basefruit)
         fruit.immutable = False
         fruit.pos = snake.pos
         self.deletedFruits[snake.pos]=fruit
@@ -177,29 +188,24 @@ class Snak:
         
     #do one step of simulation
     def update(self):
-        #first, try to advance all snakes
-        stepsuccess = [snake.step() for snake in self.snakes]
-        if all(stepsuccess):
+        #first, advance all snakes (checks self-collision)
+        for snake in self.snakes:
+            snake.step()
             
-            #no snakes collided with themselves, so we check for collisions between snakes
-            ptlist = list(pt for snake in self.snakes for pt in snake.pts)
-            #we construct a list of points in all snakes. any point that appears more than once is a collision.
-            for pt,ct in Counter(ptlist).items():
-                if ct>1:
-                    #we only report the first collision found
-                    raise Collision(pt)
-            
-            #alright, stepping succeeded! now eat any fruits that need eating and update snake directions!
-            for snake in self.snakes:
-                self.consumeFruit(snake)
-                candidateFruits = list(filter(lambda x:type(x) is tuple and snake.canSee(x,self.snakes),[self.getNextFruit(snake.pos,dir) for dir in test_dirs(snake.dir)]))
-                if candidateFruits:
-                    candidateDists = map(dist,candidateFruits,[snake.pos]*3)
-                    bestFruit = sorted(zip(candidateDists,range(3),candidateFruits))[0][2]
-                    snake.dir = tuple(map(lambda x:(x>0)-(x<0),subtract(bestFruit,snake.pos)))
-        else:
-            collidedsnake = self.snakes[stepsuccess.index(False)]
-            raise Collision(collidedsnake.pos)
+        #check for collisions between different snakes
+        for snake,othersnake in combinations(self.snakes,2):
+            if snake.pos in othersnake.ptset or othersnake.pos in snake.ptset:
+                raise Collision(snake.pos)
+        
+        #alright, stepping succeeded! now eat any fruits that need eating and update snake directions!
+        for snake in self.snakes:
+            self.consumeFruit(snake)
+            candidateFruits = list(filter(lambda x:type(x) is tuple and snake.canSee(x,self.snakes),[self.getNextFruit(snake.pos,dir) for dir in test_dirs(snake.dir)]))
+            if candidateFruits:
+                candidateDists = map(dist,candidateFruits,[snake.pos]*3)
+                bestFruit = sorted(zip(candidateDists,range(3),candidateFruits))[0][2]
+                snake.dir = tuple(map(lambda x:(x>0)-(x<0),subtract(bestFruit,snake.pos)))
+
             
     def reprAt(self,pos):
         pt=positivemod(pos,(self.width,self.height))
@@ -303,16 +309,20 @@ def visible(stdscr,snak):
         ord('s'):singlestep,
         ord('q'):stop,
         ord('n'):snak.selectNextSnake,
-        curses.KEY_UP:lambda:viewupdate(0,int(-4/pause)),
-        curses.KEY_DOWN:lambda:viewupdate(0,int(4/pause)),
-        curses.KEY_RIGHT:lambda:viewupdate(int(5/pause),0),
-        curses.KEY_LEFT:lambda:viewupdate(int(-5/pause),0)
+        curses.KEY_UP:lambda:viewupdate(0,-min(stdscr.getmaxyx()[0]//2,int(4/pause))),
+        curses.KEY_DOWN:lambda:viewupdate(0,min(stdscr.getmaxyx()[0]//2,int(4/pause))),
+        curses.KEY_RIGHT:lambda:viewupdate(min(stdscr.getmaxyx()[1]//2,int(5/pause)),0),
+        curses.KEY_LEFT:lambda:viewupdate(-min(stdscr.getmaxyx()[1]//2,int(5/pause)),0)
         })
     
     while go:
-        if stepcount>=pause or firststep:
+        if stepcount>=pause:
             #update sim
-            if step or not hold: snak.update()
+            if dragpt is None and (step or not hold): 
+                while stepcount>0.5:
+                    snak.update()
+                    stepcount-=min(stepcount,1/max(1,1-math.frexp(5*pause)[1]))
+                    if step: break
             step=False
             
             #render view into sim that fills the terminal
@@ -328,39 +338,51 @@ def visible(stdscr,snak):
                         pass
                     
             #redraw screen
-            stdscr.refresh()
+            #stdscr.refresh()
             stepcount %= pause
         
         stepcount += 1
             
-        if hold:stdscr.timeout(-1)
-        else:stdscr.timeout(int(1000*min(pause,0.5)))
-        #get key and wait
-        key=stdscr.getch()
-        
-        #handle mouse
-        if availmask and key==curses.KEY_MOUSE:
-            try:
-                _,x,y,_,t = curses.getmouse()
-                if t==curses.BUTTON1_CLICKED:
-                    followSnake = snak.selectSnake(x+viewx,y+viewy)
-                    dragpt = None
-                elif t==curses.BUTTON1_PRESSED:
-                    dragpt = (x,y)
-                elif t==curses.BUTTON1_RELEASED and dragpt is not None:
-                    dragpt = None
-                elif t==curses.REPORT_MOUSE_POSITION and dragpt is not None and dragpt!=(x,y):
-                    followSnake = False
-                    viewx -= x-dragpt[0]
-                    viewy -= y-dragpt[1]
-                    dragpt = (x,y)
+        #remember when we started
+        then = time.perf_counter()
+        waittime = int(1000*min(pause,0.5))
+        while True:
+            if hold:stdscr.timeout(-1)
+            else:stdscr.timeout(waittime)
+            #get key and wait
+            key=stdscr.getch()
+            print(key,file=sys.stderr)
+            
+            #handle mouse
+            if availmask and key==curses.KEY_MOUSE:
+                try:
+                    _,x,y,_,t = curses.getmouse()
                     curses.flushinp()
-            except curses.error as e:
-                #i have no idea what triggers some mouse movement errors
-                pass
-        else:
-            #do what the key does
-            keymap[key]()
+                    #print(x,y,t,file=sys.stderr)
+                    if t & curses.BUTTON1_CLICKED and ~t & curses.REPORT_MOUSE_POSITION:
+                        followSnake = snak.selectSnake(x+viewx,y+viewy)
+                        dragpt = None
+                    elif t & curses.BUTTON1_PRESSED:
+                        dragpt = (x,y)
+                    elif t & curses.BUTTON1_RELEASED and dragpt is not None:
+                        dragpt = None
+                    elif t & curses.REPORT_MOUSE_POSITION and dragpt is not None and dragpt!=(x,y):
+                        followSnake = False
+                        viewx -= x-dragpt[0]
+                        viewy -= y-dragpt[1]
+                        dragpt = (x,y)
+                except curses.error as e:
+                    #i have no idea what triggers some mouse movement errors
+                    #but we don't need to register them.
+                    #just try again
+                    waittime -= int(1000*(time.perf_counter()-then))
+                    if waittime<=0:
+                        continue
+            else:
+                #do what the key does
+                keymap[key]()
+            
+            break
     
 
 if __name__=="__main__":
@@ -383,6 +405,8 @@ if __name__=="__main__":
     if visualize:
         #start app with initialized terminal
         import curses
+        import math
+        import time
         try:
             curses.wrapper(visible,snak)
         except Collision: #collisions are the intended way to halt and should not error
