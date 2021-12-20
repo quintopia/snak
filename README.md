@@ -70,18 +70,19 @@ Without this flag, you will be dropped into a visualization of the executing pro
 | s              | Perform one tick while paused.            |
 | \+             | Increase the running speed                |
 | \-             | Decrease the running speed                |
+| f              | Center view on first defined snake        |
 | n              | If centered on snake, select next snake   |
 | q              | Halt immediately and exit                 |
 
 If the terminal supports mouse input:
 
-| Mouse Input           | What it Does                             |
-| :---------:           | ------------                             |
-| Click on a snake      | Center the head of the snake in the view |
-| Click on a non-snake  | Stop centering any snakes in the view    |
-| Click, hold, and drag | Drag view                                |
+| Mouse Input                 | What it Does                             |
+| :---------:                 | ------------                             |
+| Right-click on a snake      | Center the head of the snake in the view |
+| Right-click on a non-snake  | Stop centering any snakes in the view    |
+| Click, hold, and drag       | Drag view                                |
 
-Note that, for weird curses reasons, to drag, you must click and hold still for a moment before beginning to drag.
+Note that, for weird curses reasons, to drag, you must click and hold still for a moment before beginning to drag. Also, you may need to click on the app for the simulation to keep running after certain interactions (I think this is depends on which term you use.) But
 
 You can resize your terminal at any time to see more or less of the grid.
 

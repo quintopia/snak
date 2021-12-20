@@ -229,6 +229,9 @@ class Snak:
             self.selectedSnake = None
         return self.selectedSnake is not None
         
+    def selectFirstSnake(self):
+        self.selectedSnake = 0
+        
     def selectNextSnake(self):
         if self.selectedSnake is not None:
             self.selectedSnake = (self.selectedSnake + 1)%len(self.snakes)
@@ -256,6 +259,7 @@ def visible(stdscr,snak):
     stepcount = 1
     followSnake = False
     go=True
+    key=-1
     
     #make color pairs
     curses.use_default_colors()
@@ -268,9 +272,10 @@ def visible(stdscr,snak):
     colormap = {'#':1,'@':1,'+':2,'-':3,' ':0}
     
     #ask for mouse events
-    nomovemask = curses.BUTTON1_PRESSED|curses.BUTTON1_RELEASED|curses.BUTTON1_CLICKED
+    stdscr.keypad(True)
+    nomovemask = curses.BUTTON1_PRESSED|curses.BUTTON1_RELEASED|curses.BUTTON3_CLICKED
     movemask = nomovemask|curses.REPORT_MOUSE_POSITION
-    availmask,_ = curses.mousemask(movemask)
+    availmask,_ = curses.mousemask(nomovemask)
     print("\033[?1003h\n")
     dragpt = None
     
@@ -297,6 +302,11 @@ def visible(stdscr,snak):
         step = True
         stepcount+=pause
         
+    def followfirst():
+        nonlocal snak,followSnake
+        snak.selectFirstSnake()
+        followSnake = True
+        
     def stop():
         nonlocal go
         go = False
@@ -309,6 +319,7 @@ def visible(stdscr,snak):
         ord('s'):singlestep,
         ord('q'):stop,
         ord('n'):snak.selectNextSnake,
+        ord('f'):followfirst,
         curses.KEY_UP:lambda:viewupdate(0,-min(stdscr.getmaxyx()[0]//2,int(4/pause))),
         curses.KEY_DOWN:lambda:viewupdate(0,min(stdscr.getmaxyx()[0]//2,int(4/pause))),
         curses.KEY_RIGHT:lambda:viewupdate(min(stdscr.getmaxyx()[1]//2,int(5/pause)),0),
@@ -351,21 +362,25 @@ def visible(stdscr,snak):
             else:stdscr.timeout(waittime)
             #get key and wait
             key=stdscr.getch()
-            print(key,file=sys.stderr)
             
             #handle mouse
             if availmask and key==curses.KEY_MOUSE:
                 try:
                     _,x,y,_,t = curses.getmouse()
                     curses.flushinp()
-                    #print(x,y,t,file=sys.stderr)
-                    if t & curses.BUTTON1_CLICKED and ~t & curses.REPORT_MOUSE_POSITION:
+                    #print("mouse",x,y,t,file=sys.stderr)
+                    if t & curses.BUTTON3_CLICKED:
+                        #print("snake followed",file=sys.stderr)
                         followSnake = snak.selectSnake(x+viewx,y+viewy)
                         dragpt = None
                     elif t & curses.BUTTON1_PRESSED:
                         dragpt = (x,y)
+                        hold = True
+                        curses.mousemask(movemask)
                     elif t & curses.BUTTON1_RELEASED and dragpt is not None:
                         dragpt = None
+                        hold = False
+                        curses.mousemask(nomovemask)
                     elif t & curses.REPORT_MOUSE_POSITION and dragpt is not None and dragpt!=(x,y):
                         followSnake = False
                         viewx -= x-dragpt[0]
@@ -375,8 +390,9 @@ def visible(stdscr,snak):
                     #i have no idea what triggers some mouse movement errors
                     #but we don't need to register them.
                     #just try again
+                    #print("mouse error",file=sys.stderr)
                     waittime -= int(1000*(time.perf_counter()-then))
-                    if waittime<=0:
+                    if waittime>=0:
                         continue
             else:
                 #do what the key does
