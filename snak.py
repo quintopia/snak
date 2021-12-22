@@ -45,49 +45,65 @@ class Snak:
             self.dir=dir
             self.length=length
             self.pts=deque([(x,y)])
-            self.ptset={(x,y)}
+            self.xpts=defaultdict(list)
+            self.xpts[x].append(y)
+            self.ypts=defaultdict(list)
+            self.ypts[y].append(x)
             
         def changeLength(self,inc):
             self.length+=inc
-            while len(self.pts)>self.length:
-                pt = self.pts.pop()
-                self.ptset.remove(pt)
+            if len(self.pts)>self.length:
+                self.removeLastPoint()
             if not self.length:
                 raise IndexError("snake starved")
             
         #can snake see the target point? (is its head in the same row/column with no snake bodies in the way?)
-        def canSee(self,target,snakes):
-            #this is the major bottleneck for speed but i have no idea how to speed it up.
-            #(checking every point in every snake to see whether it lies between the two is slower than this for long snakes)
-            if target[0]!=self.pos[0]:
-                for x in range(min(target[0],self.pos[0])+1,max(target[0],self.pos[0])):
-                    for snake in snakes:
-                        if (x,self.pos[1]) in snake.ptset:
-                            return False
-            else:
-                for y in range(min(target[1],self.pos[1])+1,max(target[1],self.pos[1])):
-                    for snake in snakes:
-                        if (self.pos[0],y) in snake.ptset:
-                            return False
+        def canSee(self,target,snakes): #now runs O(lg n) in the number of points in the snake on the line we're examining
+            #import pdb;pdb.set_trace()
+            for snake in snakes:
+                if target[0]!=self.pos[0]:
+                    if len(snake.ypts[self.pos[1]])==1: #most common situation succeeds fast
+                        return True
+                    t = bisect.bisect_left(snake.ypts[self.pos[1]],target[0])
+                    p = bisect.bisect_left(snake.ypts[self.pos[1]],self.pos[0])
+                    if abs(t-p)>1 or snake!=self and abs(t-p)>0: #that is, if there is a point in the list between them
+                        return False
+                else:
+                    if len(snake.xpts[self.pos[0]])==1: #most common situation succeeds fast
+                        return True
+                    t = bisect.bisect_left(snake.xpts[self.pos[0]],target[1])
+                    p = bisect.bisect_left(snake.xpts[self.pos[0]],self.pos[1])
+                    if abs(t-p)>1 or snake!=self and abs(t-p)>0: #that is, if there is a point in the list between them
+                        return False
             return True
         
         #take a step in the current direction and return whether it succeeded
         def step(self):
             self.pos=add(self.pos,self.dir)
             if len(self.pts) >= self.length:
-                pt = self.pts.pop()
-                self.ptset.remove(pt)
-            if self.pos in self.ptset:
+                self.removeLastPoint()
+            if self.includesPt(self.pos):
                 raise Collision(self.pos)
             self.pts.appendleft(self.pos)
-            self.ptset.add(self.pos)
+            bisect.insort(self.xpts[self.pos[0]],self.pos[1]) #potential speedup: remember insertion point from inclusion check
+            bisect.insort(self.ypts[self.pos[1]],self.pos[0])
             
         def reprAt(self,pos):
             if self.pos==pos:
                 return '@'
-            if pos in self.ptset:
+            if self.includesPt(pos):
                 return '#'
             return ''
+            
+        def includesPt(self,pt):
+            i = bisect.bisect_left(self.xpts[pt[0]],pt[1])
+            return i<len(self.xpts[pt[0]]) and self.xpts[pt[0]][i]==pt[1]
+            
+        def removeLastPoint(self):
+            pt = self.pts.pop()
+            #consider speeding these up if necessary
+            self.xpts[pt[0]].remove(pt[1])
+            self.ypts[pt[1]].remove(pt[0])
             
         def __len__(self):
             return self.length
@@ -194,7 +210,7 @@ class Snak:
             
         #check for collisions between different snakes
         for snake,othersnake in combinations(self.snakes,2):
-            if snake.pos in othersnake.ptset or othersnake.pos in snake.ptset:
+            if othersnake.includesPt(snake.pos) or snake.includesPt(othersnake.pos):
                 raise Collision(snake.pos)
         
         #alright, stepping succeeded! now eat any fruits that need eating and update snake directions!
@@ -320,10 +336,10 @@ def visible(stdscr,snak):
         ord('q'):stop,
         ord('n'):snak.selectNextSnake,
         ord('f'):followfirst,
-        curses.KEY_UP:lambda:viewupdate(0,-min(stdscr.getmaxyx()[0]//2,int(4/pause))),
-        curses.KEY_DOWN:lambda:viewupdate(0,min(stdscr.getmaxyx()[0]//2,int(4/pause))),
-        curses.KEY_RIGHT:lambda:viewupdate(min(stdscr.getmaxyx()[1]//2,int(5/pause)),0),
-        curses.KEY_LEFT:lambda:viewupdate(-min(stdscr.getmaxyx()[1]//2,int(5/pause)),0)
+        curses.KEY_UP:lambda:viewupdate(0,-8),
+        curses.KEY_DOWN:lambda:viewupdate(0,8),
+        curses.KEY_RIGHT:lambda:viewupdate(10,0),
+        curses.KEY_LEFT:lambda:viewupdate(-10,0)
         })
     
     while go:
@@ -410,6 +426,7 @@ if __name__=="__main__":
                     help='path to Snak program file')
     parser.add_argument('length', metavar='length', type=int, help='Initial length of snake')
     parser.add_argument('-q', '--quiet', action='store_false', help='Flag to run program without visualization')
+    parser.add_argument('-t', '--timeout', type=int, default=0, help='Automatically kill after this many seconds in quiet mode')
     args=parser.parse_args()
     visualize = args.quiet
     
@@ -430,4 +447,14 @@ if __name__=="__main__":
         finally:
             print(snak)
     else:
-        invisible(snak)
+        if args.timeout:
+            import signal
+            def handler(signum,frame):
+                sys.exit()
+            signal.signal(signal.SIGALRM,handler)
+            signal.alarm(args.timeout)
+            invisible(snak)
+            signal.alarm(0)
+        else:
+            invisible(snak)
+        
