@@ -62,14 +62,14 @@ class Snak:
             #import pdb;pdb.set_trace()
             for snake in snakes:
                 if target[0]!=self.pos[0]:
-                    if len(snake.ypts[self.pos[1]])==1: #most common situation succeeds fast
+                    if snake.ypts[self.pos[1]]==[] or snake.ypts[self.pos[1]]==[self.pos[0]]: #most common situation succeeds fast
                         return True
                     t = bisect.bisect_left(snake.ypts[self.pos[1]],target[0])
                     p = bisect.bisect_left(snake.ypts[self.pos[1]],self.pos[0])
                     if abs(t-p)>1 or snake!=self and abs(t-p)>0: #that is, if there is a point in the list between them
                         return False
                 else:
-                    if len(snake.xpts[self.pos[0]])==1: #most common situation succeeds fast
+                    if snake.xpts[self.pos[0]]==[] or snake.xpts[self.pos[0]]==[self.pos[1]]: #most common situation succeeds fast
                         return True
                     t = bisect.bisect_left(snake.xpts[self.pos[0]],target[1])
                     p = bisect.bisect_left(snake.xpts[self.pos[0]],self.pos[1])
