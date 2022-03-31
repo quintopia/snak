@@ -86,6 +86,6 @@ Note that, for weird curses reasons, to drag, you must click and hold still for 
 
 You can resize your terminal at any time to see more or less of the grid.
 
-##See Also
+## See Also
 
 [Esolangs wiki page](<https://esolangs.org/wiki/Snak>)
